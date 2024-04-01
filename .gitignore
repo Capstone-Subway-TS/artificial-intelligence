@@ -1,0 +1,3 @@
+*.csv
+*.lock
+__pycache__/*
