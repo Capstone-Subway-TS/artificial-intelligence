@@ -1,0 +1,208 @@
+# AWS SAM Template - 지하철 데이터 수집 파이프라인
+# 프리티어 범위 내 비용 최적화
+
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Seoul Subway Real-time Data Collection Pipeline
+
+Parameters:
+  SeoulApiKey:
+    Type: String
+    Description: Seoul Open API Key
+    NoEcho: true
+
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - prod
+
+Globals:
+  Function:
+    Runtime: python3.11
+    Timeout: 60
+    MemorySize: 256
+    Architectures:
+      - arm64  # ARM64 사용시 20% 비용 절감
+    Environment:
+      Variables:
+        SEOUL_API_KEY: !Ref SeoulApiKey
+        S3_BUCKET: !Ref DataBucket
+        ENVIRONMENT: !Ref Environment
+
+Resources:
+  #################################################
+  # S3 Bucket - Data Lake
+  #################################################
+  DataBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub 'subway-delay-prediction-${Environment}-${AWS::AccountId}'
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          # Raw 데이터 90일 후 Glacier로 이동
+          - Id: MoveRawToGlacier
+            Status: Enabled
+            Prefix: raw/
+            Transitions:
+              - TransitionInDays: 90
+                StorageClass: GLACIER
+          # 1년 후 삭제 (비용 절감)
+          - Id: DeleteOldData
+            Status: Enabled
+            ExpirationInDays: 365
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Project
+          Value: SubwayDelayPrediction
+        - Key: Environment
+          Value: !Ref Environment
+
+  #################################################
+  # Lambda - Data Collector
+  #################################################
+  CollectorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'subway-collector-${Environment}'
+      Handler: handler.lambda_handler
+      CodeUri: ../lambda/collector/
+      Description: Collects real-time subway arrival data from Seoul Metro API
+      ReservedConcurrentExecutions: 2  # 동시 실행 제한 (비용 절감)
+      Policies:
+        - S3WritePolicy:
+            BucketName: !Ref DataBucket
+        - CloudWatchLogsFullAccess
+      Events:
+        # 2분마다 실행 (프리티어: 월 100만 건 무료)
+        ScheduleEvent:
+          Type: Schedule
+          Properties:
+            Schedule: rate(2 minutes)
+            Enabled: true
+            Description: Collect subway data every 2 minutes
+      Tags:
+        Project: SubwayDelayPrediction
+        Environment: !Ref Environment
+
+  # Lambda 로그 그룹 (보존 기간 설정으로 비용 절감)
+  CollectorLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/subway-collector-${Environment}'
+      RetentionInDays: 7  # 7일만 보존 (프리티어: 5GB 무료)
+
+  #################################################
+  # Lambda - ETL Processor
+  #################################################
+  ETLFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'subway-etl-${Environment}'
+      Handler: handler.lambda_handler
+      CodeUri: ../lambda/etl/
+      Description: Daily ETL processing for subway data
+      Timeout: 300  # 5분 (ETL은 더 오래 걸릴 수 있음)
+      MemorySize: 512
+      ReservedConcurrentExecutions: 1
+      Policies:
+        - S3CrudPolicy:
+            BucketName: !Ref DataBucket
+        - CloudWatchLogsFullAccess
+      Events:
+        # 매일 새벽 6시 (KST 15:00 UTC) 실행
+        DailyETL:
+          Type: Schedule
+          Properties:
+            Schedule: cron(0 21 * * ? *)  # 06:00 KST
+            Enabled: true
+            Description: Daily ETL processing
+            Input: '{}'
+      Tags:
+        Project: SubwayDelayPrediction
+        Environment: !Ref Environment
+
+  ETLLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/subway-etl-${Environment}'
+      RetentionInDays: 7
+
+  #################################################
+  # CloudWatch Alarms - 모니터링
+  #################################################
+  CollectorErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub 'subway-collector-errors-${Environment}'
+      AlarmDescription: Lambda 실행 오류 감지
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref CollectorFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 3
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+
+  #################################################
+  # IAM Role (자동 생성되지만 명시적 정의)
+  #################################################
+  CollectorExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'subway-collector-role-${Environment}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: S3WritePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                Resource: !Sub '${DataBucket.Arn}/*'
+
+Outputs:
+  DataBucketName:
+    Description: S3 Data Lake Bucket Name
+    Value: !Ref DataBucket
+    Export:
+      Name: !Sub '${AWS::StackName}-DataBucket'
+
+  CollectorFunctionArn:
+    Description: Collector Lambda Function ARN
+    Value: !GetAtt CollectorFunction.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-CollectorArn'
+
+  ETLFunctionArn:
+    Description: ETL Lambda Function ARN
+    Value: !GetAtt ETLFunction.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-ETLArn'
+
+  DataBucketArn:
+    Description: S3 Data Lake Bucket ARN
+    Value: !GetAtt DataBucket.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-DataBucketArn'

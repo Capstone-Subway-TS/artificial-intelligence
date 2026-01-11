@@ -1,3 +1,57 @@
+# 데이터 파일
+data/
 *.csv
+
+# 모델 파일
+ml/models/
+*.joblib
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+venv/
+.venv/
+*.egg-info/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Lock files
 *.lock
-__pycache__/*
+Pipfile.lock
+
+# Logs
+*.log
+nohup.out
+
+# Docker
+localstack-data/
+
+# AWS
+.aws-sam/
+samconfig.toml
+
+# Jupyter
+.ipynb_checkpoints/
+
+# 환경 변수
+.env
+.env.local
+
+# Claude Code
+.claude/
+
+# Chrome Driver
+chromedriver*/
+
+# Crontab
+crontab.log

@@ -1,0 +1,42 @@
+# 로컬 개발 환경 (LocalStack으로 AWS 에뮬레이션)
+version: '3.8'
+
+services:
+  # LocalStack - AWS 서비스 로컬 에뮬레이션
+  localstack:
+    image: localstack/localstack:latest
+    container_name: subway-localstack
+    ports:
+      - "4566:4566"         # LocalStack gateway
+      - "4510-4559:4510-4559"  # External services
+    environment:
+      - SERVICES=s3,lambda,events,logs
+      - DEBUG=1
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      - LAMBDA_EXECUTOR=local
+      - AWS_DEFAULT_REGION=ap-northeast-2
+    volumes:
+      - "./localstack-data:/var/lib/localstack"
+      - "/var/run/docker.sock:/var/run/docker.sock"
+
+  # 수집기 테스트용 컨테이너
+  collector:
+    build:
+      context: ./lambda/collector
+      dockerfile: Dockerfile
+    container_name: subway-collector
+    environment:
+      - SEOUL_API_KEY=${SEOUL_API_KEY}
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - AWS_DEFAULT_REGION=ap-northeast-2
+      - S3_BUCKET=subway-data
+      - LOCALSTACK_ENDPOINT=http://localstack:4566
+    volumes:
+      - "./data/collected:/app/data"
+    depends_on:
+      - localstack
+    command: ["python", "-m", "handler", "--api-key", "${SEOUL_API_KEY}", "--output-dir", "/app/data"]
+
+volumes:
+  localstack-data:
