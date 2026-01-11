@@ -1,6 +1,7 @@
 import requests
 import xml.etree.ElementTree as ET
 import json
+import pandas as pd
 
 def staion_arrive_info():
     xml_data = call_api()
@@ -82,33 +83,3 @@ def parsing_xml(xml_data):
 
 if __name__ == '__main__':
     staion_arrive_info()
-
-# {
-#         "rowNum": 1,
-#         "selectedCount": 4,
-#         "totalCount": 4,
-#         "subwayId": 1007,
-#         "updnLine": "상행",
-#         "trainLineNm": "장암행 - 군자(능동)방면",
-#         "statnFid": 1007000727,
-#         "statnTid": 1007000725,
-#         "statnId": 1007000726,
-#         "statnNm": "어린이대공원(세종대)",
-#         "trnsitCo": 1,
-#         "ordkey": "01002장암0",
-#         "subwayList": [
-#             "1007"
-#         ],
-#         "statnList": [
-#             "1007000726"
-#         ],
-#         "btrainSttus": "일반",
-#         "barvlDt": 240,
-#         "btrainNo": "7212",
-#         "bstatnId": 1,
-#         "bstatnNm": "장암",
-#         "recptnDt": "2024-03-29 15:22:44",
-#         "arvlMsg2": "4분 후 (뚝섬유원지)",
-#         "arvlMsg3": "뚝섬유원지",
-#         "arvlCd": 99
-#     },

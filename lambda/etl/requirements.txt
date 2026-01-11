@@ -1,0 +1,2 @@
+# ETL Lambda 의존성
+# boto3는 Lambda 런타임에 포함되어 있음
